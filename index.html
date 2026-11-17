@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Saving a Spot</title>
+<meta name="description" content="How long should a paused PostgreSQL CDC pipeline keep its replication slot before a guard drops it? An inverse-CDF Monte Carlo decision prototype. APM Lab by Shriya Shekatkar.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Narrow:wght@500;700&family=Archivo:wght@400;600;800&family=Great+Vibes&display=swap" rel="stylesheet">
+<style>
+:root{
+  --yellow:#F7CB05; --ink:#111111;
+  --pink:#EBB0BC; --pink-lt:#F7D6DD; --piping:#FBF4EC; --rose:#7A2E45; --silver:#B9B2B6;
+  --white:#FFFFFF; --black:#0B0B0B;
+  --paper:#F2EBD0; --tomato:#D8452C; --tomato-dk:#A8301C; --olive:#B4C27A; --olive-dk:#5E6B2A; --graphite:#454542;
+  --muted:#5b5550;
+  --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--piping);color:var(--ink);font:16px/1.55 Archivo,system-ui,sans-serif;overflow-x:hidden}
+a{color:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+h2{font-family:Anton,Impact,sans-serif;font-weight:400;letter-spacing:.01em;font-size:clamp(34px,6vw,58px);line-height:.95;margin:0 0 .3em;text-transform:uppercase}
+.kicker{font:700 13px/1 'Archivo Narrow',sans-serif;letter-spacing:.18em;text-transform:uppercase}
+section{padding:56px 0}
+.grainy{position:relative;isolation:isolate}
+.grainy::after{content:"";position:absolute;inset:0;background:var(--grain);opacity:.18;mix-blend-mode:multiply;pointer-events:none;z-index:-1}
+
+/* ---------- HERO: yellow repeated-affirmation poster ---------- */
+.hero{background:var(--yellow);color:var(--ink);overflow:hidden;padding:0}
+.hero .rows{font:500 clamp(26px,5.4vw,58px)/1.02 'Archivo Narrow',sans-serif;letter-spacing:-.01em;padding:28px 16px 0;max-width:1120px;margin:0 auto;white-space:nowrap}
+.hero .rows div{opacity:.22;animation:slide 14s ease-in-out infinite alternate}
+.hero .rows div:nth-child(even){animation-direction:alternate-reverse}
+.hero .rows div.on{opacity:1;font-weight:700}
+@keyframes slide{from{transform:translateX(0)}to{transform:translateX(-6%)}}
+.hero .meta{max-width:1120px;margin:0 auto;padding:22px 16px 34px;display:grid;gap:14px;grid-template-columns:1fr auto;align-items:end}
+.hero h1{font:700 clamp(30px,6vw,64px)/1 'Archivo Narrow',sans-serif;margin:0;letter-spacing:-.02em}
+.hero p{margin:6px 0 0;font-size:17px;max-width:640px}
+.hero .who{font:700 14px/1.35 'Archivo Narrow',sans-serif;text-transform:uppercase;letter-spacing:.12em;text-align:right}
+.hero .launch{display:inline-block;margin-top:12px;background:var(--ink);color:var(--yellow);padding:8px 12px;font:700 14px/1.3 'Archivo Narrow',sans-serif;text-decoration:none;letter-spacing:.04em}
+.hero .launch:hover{background:#333}
+@media (max-width:640px){.hero .meta{grid-template-columns:1fr}.hero .who{text-align:left}}
+
+/* ---------- CARDS: pink cake with piped bead borders ---------- */
+.cake{background:var(--pink-lt)}
+.masonry{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr));gap:24px 20px;align-items:start;margin-top:14px}
+.card{margin:0;background:var(--pink);border-radius:22px;padding:22px 20px 20px;position:relative;
+  box-shadow:0 0 0 6px var(--pink),0 0 0 9px var(--piping),0 10px 26px rgba(122,46,69,.18)}
+.card::before{content:"";position:absolute;left:10px;right:10px;top:-9px;height:12px;
+  background:radial-gradient(circle at 6px 6px,var(--piping) 5px,transparent 5.5px) 0 0/14px 12px repeat-x}
+.card h3{font:400 34px/1.05 'Great Vibes',cursive;color:var(--rose);margin:4px 0 8px}
+.card p,.card li{color:#3a1a24;font-size:15.5px}
+.card ul{padding-left:18px;margin:6px 0}
+.card .pinlabel{font:700 11px/1 'Archivo Narrow',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--rose)}
+.wings{display:block;margin:0 auto 4px;width:92px;height:auto}
+table.g{width:100%;border-collapse:collapse;font-size:14.5px}
+table.g td{padding:6px 4px;border-bottom:2px dotted rgba(122,46,69,.35);vertical-align:top}
+table.g td:last-child{text-align:right;font-weight:800;white-space:nowrap}
+.btn{appearance:none;border:0;cursor:pointer;font:700 14px/1 'Archivo Narrow',sans-serif;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--rose);background:var(--pink);padding:12px 16px;border-radius:999px;box-shadow:0 0 0 3px var(--piping),0 0 0 5px var(--rose)}
+.btn:hover{background:var(--pink-lt)}
+.btn:focus-visible,input:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+
+/* ---------- KPI BADGES: tall condensed black on white ---------- */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}
+.kpi{background:var(--white);color:var(--black);border:3px solid var(--black);padding:10px 10px 8px;text-align:center;overflow:hidden}
+.kpi b{display:block;font:400 clamp(40px,7vw,70px)/1 Anton,Impact,sans-serif;transform:scaleY(1.35);transform-origin:center;margin:12px 0 10px;letter-spacing:-.01em}
+.kpi span{font:700 11.5px/1.2 'Archivo Narrow',sans-serif;letter-spacing:.12em;text-transform:uppercase;display:block}
+.kpi.bad{background:var(--black);color:var(--white)}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+
+/* ---------- SIM ROOM: vintage ladybug print ---------- */
+.room{background:var(--paper);color:var(--graphite)}
+.room h2{color:var(--tomato-dk)}
+.room .halftone{background-image:radial-gradient(rgba(180,194,122,.45) 1.2px,transparent 1.6px);background-size:9px 9px}
+.panel{background:#FBF6E4;border:2px solid var(--graphite);border-radius:18px;padding:16px;box-shadow:6px 6px 0 var(--olive)}
+.simgrid{display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start}
+@media (max-width:860px){.simgrid{grid-template-columns:minmax(0,1fr)}}
+.simgrid>div{min-width:0}
+.ctl{margin:0 0 14px}
+.ctl label{display:flex;justify-content:space-between;font:700 13px/1.3 'Archivo Narrow',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--graphite)}
+.ctl output{color:var(--tomato-dk);font-weight:800}
+input[type=range]{width:100%;accent-color:var(--tomato)}
+canvas{display:block;width:100%;height:auto;border-radius:12px;background:#FBF6E4;border:2px solid var(--graphite)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:13.5px;margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:5px;border:1.5px solid var(--graphite)}
+.note{font-size:13.5px;color:var(--graphite)}
+.btnrow{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+
+/* ---------- MEMO ---------- */
+.memo{background:var(--white)}
+.memo .sheet{border:3px solid var(--black);padding:22px;max-width:820px;background:var(--white);box-shadow:10px 10px 0 var(--yellow)}
+.memo dt{font:400 22px/1 Anton,Impact,sans-serif;text-transform:uppercase;margin-top:16px}
+.memo dd{margin:6px 0 0}
+.vp{margin-top:18px;background:var(--yellow);padding:14px 16px;font:700 18px/1.35 'Archivo Narrow',sans-serif}
+
+/* ---------- MATH + CODE ---------- */
+.math{background:var(--pink-lt)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+.two>div{min-width:0}
+@media (max-width:820px){.two{grid-template-columns:minmax(0,1fr)}}
+pre{margin:0;background:#1d1b19;color:#F6EFE0;border-radius:14px;padding:16px;overflow:auto;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:100%}
+.code{background:var(--paper)}
+.code h3{font:400 26px/1 Anton,Impact,sans-serif;text-transform:uppercase;margin:0 0 10px;color:var(--graphite)}
+.formula{font:700 19px/1.4 'Archivo Narrow',sans-serif;background:var(--white);border-radius:12px;padding:10px 14px;display:inline-block;margin:6px 0}
+
+footer{background:var(--ink);color:#EEE;padding:28px 0 36px;font-size:14px}
+footer a{color:var(--yellow)}
+.credits{font-size:11px;color:#B8B2AA;margin-top:12px;line-height:1.6}
+.credits a{color:#D9D2C8}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<header class="hero grainy" aria-labelledby="h1">
+  <div class="rows" aria-hidden="true">
+    <div>every time I pause, the source stays safe</div>
+    <div>every time I pause, the source stays safe</div>
+    <div>every time I pause, the source stays safe</div>
+    <div class="on">every time I pause, the source stays safe</div>
+  </div>
+  <div class="meta">
+    <div>
+      <div class="kicker">APM Lab · decision prototype</div>
+      <h1 id="h1">Saving a spot, and knowing when to let it go.</h1>
+      <p>A paused change-data-capture pipeline keeps a replication slot open on the customer's PostgreSQL database. Every hour it stays away, the database hoards more write-ahead log. How long should the default guard wait before it drops the slot?</p>
+      <a class="launch" href="https://docs.databricks.com/aws/en/release-notes/product/2026/november" target="_blank" rel="noopener">Mirrors: PostgreSQL integrated CDC pipeline enters Beta (Nov 15, 2026) ↗</a>
+    </div>
+    <div class="who">Shriya Shekatkar<br>UCLA · Stats 102C Monte Carlo Methods</div>
+  </div>
+</header>
+
+<!-- DECISION -->
+<section class="cake grainy" aria-labelledby="dec">
+  <div class="wrap">
+    <div class="kicker" style="color:var(--rose)">01 · The decision</div>
+    <h2 id="dec" style="color:var(--rose)">One default, two ways to hurt a customer</h2>
+    <div class="masonry">
+      <article class="card">
+        <svg class="wings" viewBox="0 0 120 50" aria-hidden="true"><g fill="#FBF4EC" stroke="#B9B2B6" stroke-width="1.5"><path d="M58 40C40 38 20 30 8 8c10 6 18 6 24 4-6 6-4 10 2 12-6 2-6 6 0 8 6 4 16 6 24 8z"/><path d="M62 40c18-2 38-10 50-32-10 6-18 6-24 4 6 6 4 10-2 12 6 2 6 6 0 8-6 4-16 6-24 8z"/></g></svg>
+        <div class="pinlabel">Customer problem</div>
+        <h3>The slot that waits forever</h3>
+        <p>The new integrated pipeline removes the always-on gateway and can run on a schedule. Between runs, and whenever a run fails or someone pauses it, PostgreSQL keeps every change since the last read so nothing is lost. A forgotten pipeline can quietly fill the production database's disk.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Proposed change</div>
+        <h3>A default slot guard</h3>
+        <p>Ship every integrated pipeline with a guard that drops its replication slot once the pipeline has been absent for <b>H hours</b>. The source is protected; the price is a full refresh (re-snapshot) when the pipeline comes back late.</p>
+        <p>The pipeline can't measure the source while it's stopped, so the guard is time-based by design.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Success metric</div>
+        <h3>Thirty quiet days</h3>
+        <p>Share of integrated CDC pipelines that run 30 days with <b>no manual slot intervention</b> and no source-disk incident. Target: 97%+.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Guardrails</div>
+        <h3>Lines we don't cross</h3>
+        <table class="g">
+          <tr><td>Source disk-full incidents</td><td>≤ 2 / 1,000 pipeline-months</td></tr>
+          <tr><td>Forced full refreshes</td><td>≤ 60 / 1,000</td></tr>
+          <tr><td>Re-snapshot hours</td><td>≤ 400 / 1,000</td></tr>
+          <tr><td>Data loss from dropped slots</td><td>0 (always re-snapshot)</td></tr>
+        </table>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Stakeholders</div>
+        <h3>Who's in the room</h3>
+        <ul>
+          <li>Customer DBAs who own the source disk</li>
+          <li>Data engineers who own freshness</li>
+          <li>Ingestion engineering (connector + cleanup tooling)</li>
+          <li>Support, who field the 2 a.m. "disk full" ticket</li>
+          <li>Field teams selling the move off the gateway</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- SIM -->
+<section class="room grainy" aria-labelledby="sim">
+  <div class="wrap">
+    <div class="kicker">02 · Live simulation</div>
+    <h2 id="sim">The ladybug's waiting room</h2>
+    <p style="max-width:760px">Each dot is one pipeline stop drawn by inverse-CDF sampling. Across: how long the pipeline stayed away. Up: how many hours that customer's free disk could absorb the backlog. A dot under the diagonal before the guard fires is a <b>full disk</b>. A dot right of the guard line is a <b>forced re-snapshot</b>.</p>
+    <div class="kpis" aria-live="polite">
+      <div class="kpi" id="k1"><b id="kDisk">–</b><span>disk-full / 1k pipeline-months</span></div>
+      <div class="kpi" id="k2"><b id="kRef">–</b><span>forced refreshes / 1k</span></div>
+      <div class="kpi" id="k3"><b id="kHrs">–</b><span>re-snapshot hrs / 1k</span></div>
+      <div class="kpi" id="k4"><b id="kBest">–</b><span>best guard (hours)</span></div>
+    </div>
+    <div class="simgrid">
+      <div class="panel halftone">
+        <div class="ctl"><label for="H">Guard drops slot after <output id="oH"></output></label><input id="H" type="range" min="0" max="11" step="1" value="8"></div>
+        <div class="ctl"><label for="T">Trigger interval <output id="oT"></output></label><input id="T" type="range" min="15" max="240" step="15" value="60"></div>
+        <div class="ctl"><label for="W">WAL write-rate multiplier <output id="oW"></output></label><input id="W" type="range" min="0.5" max="3" step="0.1" value="1"></div>
+        <div class="ctl"><label for="C">Cost of a disk-full vs a refresh <output id="oC"></output></label><input id="C" type="range" min="5" max="200" step="5" value="50"></div>
+        <div class="ctl"><label for="N">Pipeline-months simulated <output id="oN"></output></label><input id="N" type="range" min="2000" max="20000" step="1000" value="8000"></div>
+        <div class="btnrow"><button class="btn" id="reseed">New seed</button><button class="btn" id="useBest">Use best guard</button></div>
+        <p class="note" style="margin-top:12px">Seed <b id="seedv"></b>. Same seed, same answer.</p>
+      </div>
+      <div>
+        <canvas id="cv" width="760" height="460" aria-label="Scatter of simulated pipeline stops: away hours versus hours of disk headroom, with the guard line"></canvas>
+        <div class="legend">
+          <span><i style="background:#D8452C"></i>source disk filled</span>
+          <span><i style="background:#B4C27A"></i>slot dropped → re-snapshot</span>
+          <span><i style="background:#FBF6E4"></i>came back in time</span>
+        </div>
+        <canvas id="curve" width="760" height="230" style="margin-top:14px" aria-label="Expected cost per 1,000 pipeline-months across guard settings"></canvas>
+        <p class="note">Bottom chart: expected cost per 1,000 pipeline-months for each guard setting (disk-fulls × cost ratio + refreshes), using the same random draws for every setting.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MEMO -->
+<section class="memo" aria-labelledby="memo">
+  <div class="wrap">
+    <div class="kicker">03 · Director memo (rewrites itself)</div>
+    <h2 id="memo">Memo: slot guard default</h2>
+    <div class="sheet">
+      <dl>
+        <dt>Decision</dt><dd id="mDec"></dd>
+        <dt>Evidence</dt><dd id="mEv"></dd>
+        <dt>Risks</dt><dd id="mRisk"></dd>
+        <dt>Rollout plan</dt><dd id="mPlan"></dd>
+        <dt>Next step</dt><dd id="mNext"></dd>
+      </dl>
+      <div class="vp"><span class="kicker" style="display:block;margin-bottom:6px">What I'd tell the VP in one sentence</span><span id="mVP"></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- MATH -->
+<section class="math grainy" aria-labelledby="mth">
+  <div class="wrap">
+    <div class="kicker" style="color:var(--rose)">04 · The math, from my Monte Carlo course</div>
+    <h2 id="mth" style="color:var(--rose)">Inverse CDF: turning a coin into a clock</h2>
+    <div class="masonry">
+      <article class="card">
+        <div class="pinlabel">Continuous</div>
+        <h3>Away time is exponential</h3>
+        <p>If outages end at a steady hazard, away time T has CDF F(t) = 1 − e<sup>−t/μ</sup>. Solve F(t) = u for t and every uniform number becomes a duration:</p>
+        <div class="formula">T = −μ · ln(1 − U)</div>
+        <p>A maintenance pause (μ = 3 h) and a forgotten pipeline (μ = 300 h) use the same line of code with different μ.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Counts</div>
+        <h3>How many stops per month</h3>
+        <p>Stops in a month follow a geometric count: each "chance to stop" fails with probability 1 − p. Inverting its CDF gives</p>
+        <div class="formula">K = ⌊ ln U / ln(1 − p) ⌋</div>
+        <p>so one uniform draw tells me 0, 1, 2… stops without looping.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Discrete tables</div>
+        <h3>Who is the customer?</h3>
+        <p>Write-rate tier and free-disk tier come from a joint 3×3 table. Lay the nine cell probabilities end to end on [0,1], draw U, and pick the cell it lands in. The stop's cause (pause, credentials, network, forgotten) uses the same partition trick.</p>
+      </article>
+      <article class="card">
+        <div class="pinlabel">Why it matters</div>
+        <h3>Common random numbers</h3>
+        <p>Every guard setting is scored on the <i>same</i> sampled stops, so the cost curve compares policies, not luck. Rates shrink like 1/√n: at 8,000 pipeline-months the disk-full rate carries roughly ±1 per 1,000 of noise.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- CODE -->
+<section class="code grainy" aria-labelledby="code">
+  <div class="wrap">
+    <div class="kicker">05 · How I'd run it on real data</div>
+    <h2 id="code" style="color:var(--tomato-dk)">From telemetry to a default</h2>
+    <div class="two">
+      <div>
+        <h3>SQL: fit the inputs</h3>
+<pre><code>-- illustrative tables
+WITH stops AS (
+  SELECT pipeline_id, stop_cause,
+         (unix_timestamp(resumed_at)
+          - unix_timestamp(stopped_at)) / 3600.0 AS away_hrs
+  FROM ops.cdc_pipeline_stops
+  WHERE source_type = 'postgresql'
+    AND stopped_at &gt;= current_date() - INTERVAL 90 DAYS
+)
+SELECT stop_cause,
+       count(*)                      AS n,
+       avg(away_hrs)                 AS mu_hrs,  -- exponential MLE
+       percentile(away_hrs, 0.9)     AS p90_hrs
+FROM stops GROUP BY stop_cause;
+
+SELECT width_bucket(wal_gb_per_hr, 0, 10, 3)   AS rate_tier,
+       width_bucket(free_disk_gb, 0, 600, 3)   AS disk_tier,
+       count(*) / sum(count(*)) OVER ()        AS p_cell
+FROM ops.cdc_source_snapshots GROUP BY 1, 2;</code></pre>
+      </div>
+      <div>
+        <h3>Python: score each guard</h3>
+<pre><code>import numpy as np
+rng = np.random.default_rng(102)
+
+def away(mu, u):            # inverse CDF, exponential
+    return -mu * np.log1p(-u)
+
+def simulate(H, n, cells, causes, T_min=60, k=50):
+    c = rng.choice(len(cells), n, p=cells.p)
+    rate, disk = cells.rate[c], cells.disk[c]
+    stops = np.floor(np.log(rng.random(n))
+                     / np.log(1 - 0.75)).astype(int)
+    idx = np.repeat(np.arange(n), stops)
+    cause = rng.choice(len(causes), idx.size, p=causes.p)
+    t = away(causes.mu[cause], rng.random(idx.size))
+    fill = disk[idx] / rate[idx] - T_min / 60
+    full = fill &lt; np.minimum(t, H)
+    refresh = t &gt; H
+    return 1000 * (k * full.sum() + refresh.sum()) / n
+
+best = min([2, 4, 6, 8, 12, 24, 48],
+           key=lambda H: simulate(H, 8000, cells, causes))</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Unofficial concept prototype by Shriya Shekatkar. All data is simulated. Not affiliated with any company.</b></p>
+    <p><a href="https://shriyashekatkar25-byte.github.io/apm-lab/">← Back to the APM Lab gallery</a></p>
+    <div class="credits">Design inspired by:
+      <a href="https://www.pinterest.com/pin/917397386620657704/" target="_blank" rel="noopener">"some sunday magic for ya" (kira, credited to Palesora)</a> ·
+      <a href="https://www.pinterest.com/pin/1006343479248199311/" target="_blank" rel="noopener">angel-wings birthday cake (Ашхен)</a> ·
+      <a href="https://www.pinterest.com/pin/4608097310563621184/" target="_blank" rel="noopener">LUCKY condensed type (HiFashion Shop)</a> ·
+      <a href="https://www.pinterest.com/pin/281615782945027255/" target="_blank" rel="noopener">vintage ladybug "saving you a spot" (Veronika)</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var GRID=[1,2,3,4,6,8,12,18,24,48,96,168];
+var RATE=[0.2,1.5,2.5], DISK=[40,120,500];
+var CELLS=[.18,.17,.05,.10,.20,.12,.03,.07,.08];
+var CAUSES=[{n:'planned pause',p:.50,mu:3},{n:'credential break',p:.25,mu:10},{n:'network break',p:.19,mu:6},{n:'forgotten pipeline',p:.06,mu:300}];
+var P_STOP=0.75, RESNAP_MU=6;
+var seed=102;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function pick(probs,u){var c=0;for(var i=0;i<probs.length;i++){c+=probs[i];if(u<c)return i;}return probs.length-1;}
+var $=function(id){return document.getElementById(id)};
+var S={H:$('H'),T:$('T'),W:$('W'),C:$('C'),N:$('N')};
+var draws=null, lastKey='';
+function sample(){
+  var N=+S.N.value, W=+S.W.value, key=seed+'|'+N+'|'+W;
+  if(key===lastKey) return; lastKey=key;
+  var r=mulberry32(seed), out=[];
+  var cp=CAUSES.map(function(c){return c.p});
+  for(var i=0;i<N;i++){
+    var cell=pick(CELLS,r());
+    var rate=RATE[Math.floor(cell/3)]*(0.6+0.8*r())*W;   // uniform jitter via inverse CDF
+    var disk=DISK[cell%3]*(0.6+0.8*r());
+    var k=Math.floor(Math.log(1-r())/Math.log(1-P_STOP)); // geometric inverse CDF
+    for(var j=0;j<k;j++){
+      var ci=pick(cp,r());
+      var t=-CAUSES[ci].mu*Math.log(1-r());               // exponential inverse CDF
+      var rs=-RESNAP_MU*Math.log(1-r());
+      out.push({t:t,rate:rate,disk:disk,c:ci,rs:rs,j:r()});
+    }
+  }
+  draws={N:N,stops:out};
+}
+function score(H,T,k){
+  var full=0,ref=0,hrs=0,st=draws.stops;
+  for(var i=0;i<st.length;i++){
+    var s=st[i], fill=s.disk/s.rate - T/60;
+    if(fill<Math.min(s.t,H)) full++;
+    if(s.t>H){ref++;hrs+=s.rs;}
+  }
+  var per=1000/draws.N;
+  return {full:full*per,ref:ref*per,hrs:hrs*per,cost:(k*full+ref)*per};
+}
+var cv=$('cv'), ctx=cv.getContext('2d'), cu=$('curve'), cx=cu.getContext('2d');
+var anim=null;
+function lx(v,a,b,lo,hi){var l=Math.log10(Math.max(v,lo));return a+(b-a)*(l-Math.log10(lo))/(Math.log10(hi)-Math.log10(lo));}
+function drawScatter(H,T){
+  var w=cv.width,h=cv.height,L=58,R=w-16,Tp=16,B=h-46;
+  var X=function(v){return lx(v,L,R,0.1,3000)}, Y=function(v){return lx(v,B,Tp,0.1,3000)};
+  if(anim) cancelAnimationFrame(anim);
+  var st=draws.stops, max=Math.min(st.length,4500), shown=reduce?max:0, step=Math.ceil(max/45);
+  function bg(){
+    ctx.fillStyle='#FBF6E4';ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='rgba(180,194,122,.22)';
+    for(var y=Tp;y<B;y+=9)for(var x=L;x<R;x+=9){ctx.beginPath();ctx.arc(x,y,1.1,0,6.283);ctx.fill();}
+    ctx.strokeStyle='#454542';ctx.lineWidth=1.5;ctx.strokeRect(L,Tp,R-L,B-Tp);
+    ctx.font='12px Archivo, sans-serif';ctx.fillStyle='#454542';ctx.textAlign='center';
+    [0.1,1,10,100,1000].forEach(function(v){ctx.fillText(v>=1?v+'h':v,X(v),B+16);ctx.save();ctx.textAlign='right';ctx.fillText(v>=1?v+'h':v,L-6,Y(v)+4);ctx.restore();});
+    ctx.font='bold 12px "Archivo Narrow", sans-serif';
+    ctx.fillText('HOURS AWAY (log)',(L+R)/2,h-10);
+    ctx.save();ctx.translate(14,(Tp+B)/2);ctx.rotate(-Math.PI/2);ctx.fillText('HOURS UNTIL DISK FULL (log)',0,0);ctx.restore();
+    ctx.setLineDash([5,5]);ctx.strokeStyle='#A8301C';ctx.beginPath();ctx.moveTo(X(0.1),Y(0.1));ctx.lineTo(X(3000),Y(3000));ctx.stroke();
+    ctx.setLineDash([]);ctx.strokeStyle='#5E6B2A';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(X(H),Tp);ctx.lineTo(X(H),B);ctx.stroke();
+    ctx.fillStyle='#5E6B2A';ctx.textAlign=X(H)>R-90?'right':'left';ctx.fillText('GUARD '+H+'h',X(H)+(X(H)>R-90?-6:6),Tp+16);
+  }
+  function dot(s){
+    var fill=Math.max(s.disk/s.rate - T/60,0.1), x=X(Math.min(s.t,2900)), y=Math.max(Tp+4,Y(Math.min(fill,2900))+ (s.j-.5)*3);
+    var full=fill<Math.min(s.t,H), ref=s.t>H;
+    ctx.beginPath();ctx.arc(x,y,full?4.2:3,0,6.283);
+    ctx.fillStyle=full?'#D8452C':ref?'#B4C27A':'#FBF6E4';ctx.fill();
+    ctx.strokeStyle='#454542';ctx.lineWidth=.8;ctx.stroke();
+    if(full){ctx.fillStyle='#111';ctx.beginPath();ctx.arc(x-1.3,y-.8,.9,0,6.283);ctx.arc(x+1.4,y+.9,.9,0,6.283);ctx.fill();}
+  }
+  function frame(){
+    bg(); shown=Math.min(max,shown+step);
+    for(var i=0;i<shown;i++) dot(st[i]);
+    if(shown<max) anim=requestAnimationFrame(frame);
+  }
+  if(reduce){bg();for(var i=0;i<max;i++)dot(st[i]);} else frame();
+}
+function drawCurve(res,H,best){
+  var w=cu.width,h=cu.height,L=58,R=w-16,Tp=18,B=h-36;
+  cx.fillStyle='#FBF6E4';cx.fillRect(0,0,w,h);
+  var mx=Math.max.apply(null,res.map(function(r){return r.cost}))*1.1||1;
+  var X=function(i){return L+(R-L)*i/(GRID.length-1)}, Y=function(v){return B-(B-Tp)*v/mx};
+  cx.strokeStyle='#454542';cx.lineWidth=1.5;cx.strokeRect(L,Tp,R-L,B-Tp);
+  cx.font='12px Archivo, sans-serif';cx.fillStyle='#454542';cx.textAlign='center';
+  GRID.forEach(function(g,i){cx.fillText(g+'h',X(i),B+16);});
+  cx.textAlign='right';cx.fillText(Math.round(mx),L-6,Tp+10);cx.fillText('0',L-6,B);
+  cx.textAlign='center';cx.font='bold 12px "Archivo Narrow", sans-serif';cx.fillText('GUARD SETTING',(L+R)/2,h-4);
+  cx.strokeStyle='#D8452C';cx.lineWidth=3;cx.beginPath();
+  res.forEach(function(r,i){i?cx.lineTo(X(i),Y(r.cost)):cx.moveTo(X(i),Y(r.cost));});cx.stroke();
+  res.forEach(function(r,i){
+    cx.beginPath();cx.arc(X(i),Y(r.cost),GRID[i]===H?8:5,0,6.283);
+    cx.fillStyle=GRID[i]===best?'#B4C27A':(GRID[i]===H?'#D8452C':'#FBF6E4');cx.fill();cx.strokeStyle='#454542';cx.lineWidth=1.5;cx.stroke();
+  });
+}
+function fmt(v){return v>=100?Math.round(v).toString():v.toFixed(1)}
+function update(){
+  var H=GRID[+S.H.value],T=+S.T.value,W=+S.W.value,K=+S.C.value,N=+S.N.value;
+  $('oH').textContent=H+' h';$('oT').textContent=T+' min';$('oW').textContent=W.toFixed(1)+'×';$('oC').textContent=K+'×';$('oN').textContent=N.toLocaleString('en-US');$('seedv').textContent=seed;
+  sample();
+  var res=GRID.map(function(g){return score(g,T,K)});
+  var ok=res.map(function(r,i){return {i:i,r:r}}).filter(function(o){return o.r.full<=2&&o.r.ref<=60});
+  var bi=0;res.forEach(function(r,i){if(r.cost<res[bi].cost)bi=i;});
+  var best=GRID[bi], cur=res[+S.H.value];
+  $('kDisk').textContent=fmt(cur.full);$('kRef').textContent=fmt(cur.ref);$('kHrs').textContent=Math.round(cur.hrs);$('kBest').textContent=best;
+  $('k1').classList.toggle('bad',cur.full>2);$('k2').classList.toggle('bad',cur.ref>60);$('k3').classList.toggle('bad',cur.hrs>400);
+  drawScatter(H,T);drawCurve(res,H,best);
+  // memo
+  var b=res[bi], floorFull=res[0].full;
+  var meets=b.full<=2&&b.ref<=60;
+  $('mDec').innerHTML='Ship the integrated pipeline with a default slot guard of <b>'+best+' hours</b>'+(best===H?' (the setting on screen).':' (the screen shows '+H+' h; the curve prefers '+best+' h).')+' Keep it user-adjustable, and show the countdown on the pipeline page.';
+  $('mEv').innerHTML='Across '+N.toLocaleString('en-US')+' simulated pipeline-months ('+draws.stops.length.toLocaleString('en-US')+' stops, seed '+seed+'), a '+best+' h guard gives <b>'+fmt(b.full)+'</b> disk-full incidents and <b>'+fmt(b.ref)+'</b> forced re-snapshots per 1,000 pipeline-months (≈'+Math.round(b.hrs)+' re-snapshot hours). With no practical guard (168 h) disk-fulls rise to '+fmt(res[GRID.length-1].full)+'; with a hair-trigger 1 h guard re-snapshots jump to '+fmt(res[0].ref)+'.';
+  $('mRisk').innerHTML=(meets?'Guardrails hold at this setting. ':'<b>Guardrails are breached at the best setting</b> ('+(b.full>2?'disk-full '+fmt(b.full)+' > 2':'')+(b.full>2&&b.ref>60?'; ':'')+(b.ref>60?'refreshes '+fmt(b.ref)+' > 60':'')+'). ')+(floorFull>0.05?'Even a 1 h guard leaves '+fmt(floorFull)+' disk-fulls per 1,000: high-write, small-disk sources fill faster than any time-based guard can react. ':'The disk-full tail lives almost entirely in high-write, small-disk sources; a longer guard exposes them first. ')+'A '+T+'-minute trigger interval adds '+T+' minutes of backlog to every stop. Dropped slots never lose data, but every re-snapshot is a freshness gap for downstream dashboards.';
+  $('mPlan').innerHTML='Beta cohort first: guard on by default for new integrated pipelines, '+best+' h, with an email at 50% and 90% of the countdown. Watch the success metric and the four guardrails weekly for 4 weeks, then make it the GA default. Existing pipelines get an opt-in banner, not a silent change.';
+  $('mNext').innerHTML='Pull 90 days of real stop durations and source WAL rates (SQL in section 05), refit μ per cause, and rerun. In parallel, scope a disk-aware check for the high-write, small-disk tier, because time alone can\'t protect them.';
+  $('mVP').textContent=(best===8||best===18?'An ':'A ')+best+'-hour slot guard keeps customer databases from filling up in all but about '+fmt(b.full)+' of every 1,000 pipeline-months, at the cost of about '+fmt(b.ref)+' re-snapshots, and the remaining tail sits in high-write, small-disk sources that need a disk-aware check, not a shorter timer.';
+}
+['H','T','W','C','N'].forEach(function(k){S[k].addEventListener('input',update);});
+$('reseed').addEventListener('click',function(){seed=Math.floor(Math.random()*90000)+1000;update();});
+$('useBest').addEventListener('click',function(){var b=+$('kBest').textContent;S.H.value=GRID.indexOf(b);update();});
+update();
+})();
+</script>
+</body>
+</html>
